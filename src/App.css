@@ -1,0 +1,438 @@
+:root {
+  font-family: "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+/* Empty chrome never steals clicks — only real controls do. */
+.deck {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.edge-hotzone,
+.fan-shell,
+.tab,
+.icon-btn,
+.tab-preview,
+.note-card.is-visible {
+  pointer-events: auto;
+}
+
+/* —— Rest: pill at Noty pillTop (stable when panel shrinks). —— */
+.edge-hotzone {
+  position: absolute;
+  right: 0;
+  left: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: rgba(8, 8, 12, 0.04);
+  cursor: pointer;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.pill {
+  width: 12px;
+  height: 100%;
+  padding: 7px 0;
+  border-radius: 6px 0 0 6px;
+  background: rgba(20, 18, 16, 0.82);
+  box-shadow: -2px 1px 10px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.edge-hotzone:hover .pill {
+  width: 14px;
+  background: rgba(20, 18, 16, 0.92);
+}
+
+.dash {
+  width: 7px;
+  height: 14px;
+  border-radius: 2.5px;
+  flex-shrink: 0;
+}
+
+/* —— Fan: top = Noty fanTop (aligned to resting pill). —— */
+.fan-shell {
+  position: absolute;
+  right: 0;
+  width: 70px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 0;
+}
+
+.fan {
+  width: var(--tab-w, 30px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-height: min(68vh, 720px);
+  overflow-x: visible;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.fan::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  width: var(--tab-w, 30px);
+  height: var(--item-h, 96px);
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.tab-face {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 11px 0 0 11px;
+  box-shadow: -3px 2px 12px rgba(0, 0, 0, 0.18);
+  transform: rotate(-3deg) translateX(0);
+  transform-origin: right center;
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1.15, 0.36, 1),
+    box-shadow 0.28s ease;
+}
+
+.tab:hover .tab-face {
+  transform: rotate(-3deg) translateX(-4px);
+  box-shadow: -5px 3px 14px rgba(0, 0, 0, 0.24);
+}
+
+.tab.is-open .tab-face {
+  transform: rotate(-2deg) translateX(-6px);
+  box-shadow: -5px 3px 16px rgba(0, 0, 0, 0.26);
+}
+
+/* Sideways label like Noty: laid out horizontally, then rotated 90° so
+   the word reads top → bottom along the uncovered strip. Sized to fit. */
+.tab-label {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: calc(var(--strip, 56px) - 12px);
+  height: var(--tab-w, 30px);
+  margin-left: calc(var(--tab-w, 30px) / -2);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 2px;
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  transform: rotate(90deg);
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+.pin-dot {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.fan-actions {
+  margin-top: 10px;
+  margin-right: 2px;
+}
+
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 252, 245, 0.94);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: #fff;
+}
+
+/* Preview: normal horizontal type */
+.tab-preview {
+  position: absolute;
+  right: 78px;
+  top: 12%;
+  width: 220px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border-left: 3px solid;
+  box-shadow: -6px 10px 24px rgba(0, 0, 0, 0.18);
+  z-index: 20;
+  animation: tab-preview-in 0.26s cubic-bezier(0.22, 1.15, 0.36, 1) both;
+}
+
+@keyframes tab-preview-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.tab-preview strong {
+  display: block;
+  font-size: 17px;
+  font-family: Georgia, "Iowan Old Style", serif;
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.tab-preview p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  opacity: 0.88;
+}
+
+/* Note card — grows from its tab (Noty) */
+.note-card {
+  position: absolute;
+  right: 52px;
+  width: min(400px, calc(100% - 60px));
+  min-height: 160px;
+  max-height: min(72%, 640px);
+  border-radius: 14px 4px 14px 14px;
+  border-left: 3px solid;
+  box-shadow: -8px 12px 32px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  pointer-events: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  z-index: 40;
+  color-scheme: light;
+  /* thin paper-matching scrollbar (not OS chrome) */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(58, 48, 8, 0.28) transparent;
+}
+
+.note-card::-webkit-scrollbar {
+  width: 5px;
+  height: 0;
+}
+
+.note-card::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.note-card::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 10px 0;
+}
+
+.note-card::-webkit-scrollbar-thumb {
+  background: rgba(58, 48, 8, 0.22);
+  border-radius: 999px;
+}
+
+.note-card::-webkit-scrollbar-thumb:hover {
+  background: rgba(58, 48, 8, 0.4);
+}
+
+.note-card::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  -webkit-appearance: none;
+}
+
+.note-card.is-visible {
+  pointer-events: auto;
+}
+
+.note-body {
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dict-hint {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.note-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  animation: note-section-in 0.28s ease-out both;
+}
+
+@keyframes note-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-section {
+    animation: none;
+  }
+}
+
+.note-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.45;
+}
+
+.note-section textarea {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  resize: none;
+  outline: none;
+  padding: 0;
+  line-height: 1.45;
+  font-size: 13px;
+  /* scroll only on the card — avoid nested OS scrollbars inside fields */
+  overflow: hidden;
+  max-height: none;
+}
+
+.note-section.is-emphasis textarea {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.note-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.note-word {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 22px;
+  font-family: Georgia, "Iowan Old Style", "Songti SC", serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  outline: none;
+  padding: 0;
+}
+
+.note-word::placeholder {
+  color: inherit;
+  opacity: 0.35;
+  font-weight: 600;
+}
+
+.note-tools {
+  display: flex;
+  gap: 2px;
+}
+
+.note-tools button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 6px;
+}
+
+.note-tools button:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.note-delete {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.45;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.note-delete:hover {
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill,
+  .tab-face,
+  .tab:hover .tab-face,
+  .tab.is-open .tab-face {
+    transition: none;
+  }
+
+  .tab-preview,
+  .note-section {
+    animation: none;
+  }
+}
