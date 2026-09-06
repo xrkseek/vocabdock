@@ -20,6 +20,10 @@ Windows 屏幕右缘停靠的英语词条便利贴（Tauri 2 + React + GSAP）�
 - Visual Studio 2022 Build Tools（MSVC）
 - WebView2（Windows 10/11 一般已自带）
 
+## 下载
+
+安装包在 [GitHub Releases](https://github.com/xrkseek/vocabdock/releases)：选最新版的 `VocabDock_*_x64-setup.exe`。
+
 ## 开发
 
 ```bash
@@ -27,16 +31,11 @@ npm install
 npm run tauri -- dev
 ```
 
-## 打包
+本地打包（产物只在本机 `target/`，不进仓库）：
 
 ```bash
 npm run tauri -- build
 ```
-
-产物：
-
-- `src-tauri/target/release/vocabdock.exe`
-- `src-tauri/target/release/bundle/nsis/VocabDock_0.1.0_x64-setup.exe`
 
 ## 许可
 
