@@ -1,12 +1,12 @@
 [package]
-name = "notepad"
+name = "vocabdock"
 version = "0.1.0"
-description = "English study sticky notes docked to the screen edge"
+description = "Edge-docked English vocab sticky notes for Windows"
 authors = ["xrkseek"]
 edition = "2021"
 
 [lib]
-name = "notepad_lib"
+name = "vocabdock_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

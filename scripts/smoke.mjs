@@ -35,7 +35,7 @@ async function main() {
 
   const app = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert(app.includes("pillTopPx") && app.includes("fanTopPx"), "Noty Y geometry");
-  assert(app.includes("shrinkDelayMs"), "delayed shrink");
+  assert(app.includes("restLeaveMs") || app.includes("scheduleRest"), "soft rest leave");
   assert(app.includes("派生"), "forms UI");
 
   const rust = fs.readFileSync(

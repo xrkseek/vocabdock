@@ -10,20 +10,12 @@ use tauri::{
 };
 
 /// Noty geometry (logical px at 100% scale).
-const PILL_W: f64 = 12.0;
-const EDGE_W: f64 = 14.0;
-const DASH_H: f64 = 14.0;
-const DASH_GAP: f64 = 5.0;
-const PILL_PAD: f64 = 7.0;
-/// Noty fanWidth (50) — the interactive strip against the edge.
-const FAN_W: f64 = 50.0;
-/// Noty: hotZone width = fanWidth + 20.
-const HOT_PAD: f64 = 20.0;
-/// Fan + expanded share this width so opening a note cannot "fly in".
-/// Noty default medium note: max(50, 460) + 22 = 482. We use small 400 → 422;
-/// keep a little headroom for lean/bleed.
-const PANEL_W: f64 = 442.0;
-const DECK_Y_RATIO: f64 = 0.5;
+/// Rest strip fallback when pill hit-rect has not published yet.
+const EDGE_W: f64 = 18.0;
+/// Noty fanWidth (50) — interactive strip against the edge.
+const FAN_W: f64 = 56.0;
+/// Noty: hotZone ≈ fanWidth + 20; slightly roomier for hover.
+const HOT_PAD: f64 = 10.0;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 pub struct HitRect {
@@ -39,16 +31,13 @@ struct DeckHit {
     mode: String,
     /// Preview / open-note rects in CSS viewport px (logical).
     extras: Vec<HitRect>,
+    /// Note/tab drag: keep HWND interactive so click-through can't steal moves.
+    capture: bool,
 }
 
 struct HitState(Arc<Mutex<DeckHit>>);
 
-fn pill_height(note_count: u32) -> f64 {
-    let n = note_count.clamp(1, 14) as f64;
-    PILL_PAD * 2.0 + n * DASH_H + (n - 1.0).max(0.0) * DASH_GAP
-}
-
-fn dock_window(window: &WebviewWindow, mode: &str, note_count: u32) -> Result<(), String> {
+fn dock_window(window: &WebviewWindow, mode: &str, _note_count: u32) -> Result<(), String> {
     let monitor = window
         .current_monitor()
         .map_err(|e| e.to_string())?
@@ -56,41 +45,40 @@ fn dock_window(window: &WebviewWindow, mode: &str, note_count: u32) -> Result<()
         .ok_or_else(|| "no monitor".to_string())?;
 
     let work = monitor.work_area();
-    let full = monitor.size();
-    let full_pos = monitor.position();
     let scale = monitor.scale_factor();
 
-    let (w_log, h_log, y_phys) = match mode {
-        // Noty rest: panel is only the pill height — not full-screen.
-        "rest" => {
-            let h = pill_height(note_count);
-            let available = (work.size.height as f64 / scale) - h;
-            // Windows y grows downward; Noty (Cocoa) y grows up with deckYRatio
-            // from visibleFrame.minY — mid-screen ≈ ratio 0.5 either way.
-            let y_from_work_top = available * (1.0 - DECK_Y_RATIO);
-            let y = work.position.y + (y_from_work_top * scale).round() as i32;
-            (EDGE_W.max(PILL_W + 2.0), h, y)
-        }
-        // Noty fan + expanded: same width, full work-area height.
-        "fan" | "expanded" => {
-            let h = work.size.height as f64 / scale;
-            (PANEL_W, h, work.position.y)
-        }
-        _ => (EDGE_W, pill_height(note_count), work.position.y),
-    };
+    // ALL modes share one HWND size (Noty fan↔expanded lesson).
+    // Match work-area width AND height so free-drag isn't capped near mid-screen
+    // (old fixed 720px width felt like an invisible left wall). Empty areas stay
+    // click-through via the hit thread — only the right strip + chrome receive input.
+    let _ = mode;
+    let w_log = work.size.width as f64 / scale;
+    let h_log = work.size.height as f64 / scale;
+    let x = work.position.x;
+    let y_phys = work.position.y;
 
     let width_phys = (w_log * scale).round() as u32;
     let height_phys = (h_log * scale).round() as u32;
-    // Dock to absolute right of the monitor (Noty: full.maxX - w).
-    let x = full_pos.x + full.width as i32 - width_phys as i32;
 
-    window
-        .set_size(PhysicalSize::new(width_phys, height_phys.max(1)))
-        .map_err(|e| e.to_string())?;
-    window
-        .set_position(PhysicalPosition::new(x, y_phys))
-        .map_err(|e| e.to_string())?;
-    let _ = window.set_ignore_cursor_events(false);
+    let same = window
+        .outer_size()
+        .ok()
+        .zip(window.outer_position().ok())
+        .is_some_and(|(sz, pos)| {
+            sz.width == width_phys
+                && sz.height == height_phys.max(1)
+                && pos.x == x
+                && pos.y == y_phys
+        });
+    if !same {
+        window
+            .set_size(PhysicalSize::new(width_phys, height_phys.max(1)))
+            .map_err(|e| e.to_string())?;
+        window
+            .set_position(PhysicalPosition::new(x, y_phys))
+            .map_err(|e| e.to_string())?;
+        let _ = window.set_ignore_cursor_events(true);
+    }
     let _ = window.set_always_on_top(true);
     Ok(())
 }
@@ -108,9 +96,8 @@ fn dock_edge(
     {
         let mut hit = state.0.lock();
         hit.mode = mode.clone();
-        if mode == "rest" {
-            hit.extras.clear();
-        }
+        // Extras (pill / preview / note) are owned by the frontend via set_hit_regions.
+        // Clearing them here left a frame where rest fell back to the whole strip.
     }
     dock_window(&window, &mode, note_count.unwrap_or(5))
 }
@@ -121,6 +108,23 @@ fn set_hit_regions(regions: Vec<HitRect>, state: State<'_, HitState>) {
     state.0.lock().extras = regions;
 }
 
+/// While dragging chrome inside the panel, force the HWND to receive pointer events.
+#[tauri::command]
+fn set_input_capture(
+    capture: bool,
+    app: AppHandle,
+    state: State<'_, HitState>,
+) -> Result<(), String> {
+    state.0.lock().capture = capture;
+    if capture {
+        let window = app
+            .get_webview_window("main")
+            .ok_or_else(|| "main window missing".to_string())?;
+        let _ = window.set_ignore_cursor_events(false);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn quit_app(_app: AppHandle) {
     // Hit-test thread is non-joinable; force exit so Quit really ends the process.
@@ -128,7 +132,7 @@ fn quit_app(_app: AppHandle) {
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let quit = MenuItem::with_id(app, "quit", "退出 Notepad", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出 VocabDock", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&quit])?;
     // Path is relative to the crate root (src-tauri/), not src/.
     let icon = app
@@ -139,7 +143,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("Notepad — 右键退出")
+        .tooltip("VocabDock — 右键退出")
         .on_menu_event(|_app, event| {
             if event.id.as_ref() == "quit" {
                 std::process::exit(0);
@@ -175,16 +179,21 @@ fn strip_html(s: &str) -> String {
 
 fn clean_lookup_word(raw: &str) -> Option<String> {
     let word = raw.trim().to_lowercase();
-    if word.len() < 2 || word.len() > 40 {
+    if word.len() < 2 || word.len() > 64 {
         return None;
     }
+    // Allow multi-word phrases: "public health", hyphens, apostrophes.
     if !word
         .chars()
-        .all(|c| c.is_ascii_alphabetic() || c == '\'' || c == '-')
+        .all(|c| c.is_ascii_alphabetic() || c == '\'' || c == '-' || c == ' ')
     {
         return None;
     }
-    Some(word)
+    let collapsed = word.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() < 2 {
+        return None;
+    }
+    Some(collapsed)
 }
 
 fn urlencoding_lite(s: &str) -> String {
@@ -417,7 +426,7 @@ async fn lookup_word(word: String) -> Result<Option<DictHit>, String> {
     let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(8))
-        .user_agent("Notepad/0.1")
+        .user_agent("VocabDock/0.1")
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -462,6 +471,171 @@ async fn lookup_word(word: String) -> Result<Option<DictHit>, String> {
     }))
 }
 
+/// English → Chinese via Bing Translator web API (no key).
+#[tauri::command]
+async fn translate_sentence(text: String) -> Result<Option<String>, String> {
+    let text = text.trim();
+    let chars = text.chars().count();
+    if chars < 2 || chars > 500 {
+        return Ok(None);
+    }
+    Ok(translate_bing(text).await)
+}
+
+fn translation_ok(src: &str, out: &str) -> bool {
+    let t = out.trim();
+    !t.is_empty() && !t.eq_ignore_ascii_case(src)
+}
+
+#[derive(Clone)]
+struct BingSession {
+    host: String,
+    ig: String,
+    iid: String,
+    key: String,
+    token: String,
+    cookies: String,
+    fetched_ms: u128,
+}
+
+static BING: Mutex<Option<BingSession>> = Mutex::new(None);
+
+fn now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn bing_ua() -> &'static str {
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0"
+}
+
+fn pick_re<'a>(body: &'a str, re: &str) -> Option<&'a str> {
+    let start = body.find(re)?;
+    let rest = &body[start + re.len()..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
+fn pick_abuse(body: &str) -> Option<(String, String)> {
+    let marker = "params_AbusePreventionHelper";
+    let i = body.find(marker)?;
+    let rest = &body[i..];
+    let lb = rest.find('[')?;
+    let rb = rest.find(']')?;
+    let arr: serde_json::Value = serde_json::from_str(&rest[lb..=rb]).ok()?;
+    let key = arr.get(0)?.to_string();
+    let token = arr.get(1)?.as_str()?.to_string();
+    if key.is_empty() || token.is_empty() {
+        return None;
+    }
+    Some((key.trim_matches('"').to_string(), token))
+}
+
+fn cookie_header(res: &reqwest::Response) -> String {
+    res.headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .map(|c| c.split(';').next().unwrap_or(c).trim())
+        .filter(|c| !c.is_empty())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+async fn bing_refresh(client: &reqwest::Client) -> Option<BingSession> {
+    let res = client
+        .get("https://www.bing.com/translator")
+        .header("User-Agent", bing_ua())
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?;
+    let cookies = cookie_header(&res);
+    let final_url = res.url().clone();
+    let body = res.text().await.ok()?;
+    let host = final_url.host_str().unwrap_or("www.bing.com").to_string();
+    let ig = pick_re(&body, "IG:\"")?.to_string();
+    let iid = pick_re(&body, "data-iid=\"")?.to_string();
+    let (key, token) = pick_abuse(&body)?;
+    Some(BingSession {
+        host,
+        ig,
+        iid,
+        key,
+        token,
+        cookies,
+        fetched_ms: now_ms(),
+    })
+}
+
+async fn translate_bing(text: &str) -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .redirect(reqwest::redirect::Policy::limited(8))
+        .user_agent(bing_ua())
+        .build()
+        .ok()?;
+
+    for attempt in 0..2u8 {
+        let cached = {
+            let mut slot = BING.lock();
+            let stale = slot
+                .as_ref()
+                .map(|s| now_ms().saturating_sub(s.fetched_ms) > 25 * 60 * 1000)
+                .unwrap_or(true);
+            if attempt > 0 || stale {
+                *slot = None;
+            }
+            slot.as_ref().cloned()
+        };
+
+        let session = if let Some(s) = cached {
+            s
+        } else {
+            let fresh = bing_refresh(&client).await?;
+            *BING.lock() = Some(fresh.clone());
+            fresh
+        };
+
+        let url = format!(
+            "https://{}/ttranslatev3?isVertical=1&IG={}&IID={}&SFX=1&ref=TThis&edgepdftranslator=1",
+            session.host, session.ig, session.iid
+        );
+        let form = [
+            ("fromLang", "en"),
+            ("to", "zh-Hans"),
+            ("text", text),
+            ("token", session.token.as_str()),
+            ("key", session.key.as_str()),
+            ("tryFetchingGenderDebiasedTranslations", "true"),
+        ];
+        let mut req = client
+            .post(&url)
+            .header("User-Agent", bing_ua())
+            .header("Referer", format!("https://{}/translator", session.host))
+            .header("Content-Type", "application/x-www-form-urlencoded");
+        if !session.cookies.is_empty() {
+            req = req.header("Cookie", &session.cookies);
+        }
+        let res = req.form(&form).send().await.ok()?;
+        if res.status().as_u16() == 401 {
+            *BING.lock() = None;
+            continue;
+        }
+        let json: serde_json::Value = res.error_for_status().ok()?.json().await.ok()?;
+        let t = json
+            .pointer("/0/translations/0/text")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| translation_ok(text, s))?;
+        return Some(t.to_string());
+    }
+    None
+}
+
 fn cursor_screen() -> Option<(i32, i32)> {
     #[cfg(windows)]
     {
@@ -495,10 +669,10 @@ fn over_hotzone(
     extras: &[HitRect],
 ) -> bool {
     if !(lx >= 0.0 && ly >= 0.0 && lx <= win_w_log && ly <= win_h_log) {
-        // Outside the panel frame entirely.
         return false;
     }
     match mode {
+        // Rest HWND is a full-height hairline — whole strip is the hot zone.
         "rest" => true,
         "fan" | "expanded" => {
             let strip_w = FAN_W + HOT_PAD;
@@ -506,6 +680,7 @@ fn over_hotzone(
             if lx >= strip_x0 {
                 return true;
             }
+            // Only real chrome (note / preview / pill) — empty dock stays click-through.
             extras.iter().any(|r| point_in_rect(lx, ly, r))
         }
         _ => true,
@@ -517,6 +692,9 @@ fn start_hit_thread(window: WebviewWindow, hits: Arc<Mutex<DeckHit>>) {
         let mut ignored = false;
         let mut was_over = true;
         let mut away_ticks: u8 = 0;
+        // Debounce ignore toggles — WebView2 flashes a dark edge if we flip every frame.
+        let mut ignore_stable: u8 = 0;
+        let mut pending_ignore = false;
 
         loop {
             std::thread::sleep(Duration::from_millis(16));
@@ -543,39 +721,50 @@ fn start_hit_thread(window: WebviewWindow, hits: Arc<Mutex<DeckHit>>) {
                 && cx < pos.x + size.width as i32
                 && cy < pos.y + size.height as i32;
 
-            let (mode, extras) = {
+            let (mode, extras, capture) = {
                 let g = hits.lock();
-                (g.mode.clone(), g.extras.clone())
+                (g.mode.clone(), g.extras.clone(), g.capture)
             };
 
-            // Mirror Noty: "over the deck" means the edge strip / extras,
-            // not the entire wide panel.
-            let over = if mode == "rest" {
+            let over = if capture {
+                // Drag in progress — whole docked panel must stay live.
                 in_window
+            } else if mode == "rest" {
+                // Rest: ONLY the pill / edge strip is hot — never the whole work area.
+                if !in_window {
+                    false
+                } else if extras.is_empty() {
+                    lx >= (win_w_log - EDGE_W).max(0.0)
+                } else {
+                    extras.iter().any(|r| point_in_rect(lx, ly, r))
+                }
             } else if in_window {
                 over_hotzone(&mode, win_w_log, win_h_log, lx, ly, &extras)
             } else {
-                // Cursor left the HWND — still check strip in screen space so a
-                // 1px gap at the monitor edge does not count as "away".
                 false
             };
 
-            // Empty panel chrome must click through (Noty hitTest → nil).
             let should_ignore = in_window && !over;
-            if should_ignore != ignored {
+            if should_ignore == pending_ignore {
+                ignore_stable = ignore_stable.saturating_add(1);
+            } else {
+                pending_ignore = should_ignore;
+                ignore_stable = 1;
+            }
+            // Click-through on quickly (1 frame); taking input stays debounced to avoid edge flash.
+            let need = if should_ignore { 1 } else { 3 };
+            if should_ignore != ignored && ignore_stable >= need {
                 let _ = window.set_ignore_cursor_events(should_ignore);
                 ignored = should_ignore;
             }
 
-            // Fan collapses when the pointer leaves the strip (Noty idle poll).
             if mode == "fan" {
                 if over {
                     away_ticks = 0;
                     was_over = true;
                 } else if was_over || away_ticks > 0 {
                     away_ticks = away_ticks.saturating_add(1);
-                    // ~150ms confirm, same as Noty pointerExited delay.
-                    if away_ticks >= 10 {
+                    if away_ticks >= 5 {
                         was_over = false;
                         away_ticks = 0;
                         let _ = window.emit("deck-away", ());
@@ -591,9 +780,17 @@ fn start_hit_thread(window: WebviewWindow, hits: Arc<Mutex<DeckHit>>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebView2: transparent clear color (AARRGGBB). Without this, empty panel
+    // chrome paints as an opaque black/grey strip — worst on hover toggles.
+    #[cfg(windows)]
+    {
+        std::env::set_var("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00FFFFFF");
+    }
+
     let hits = Arc::new(Mutex::new(DeckHit {
         mode: "rest".into(),
         extras: Vec::new(),
+        capture: false,
     }));
     let hit_state = HitState(hits.clone());
 
@@ -602,7 +799,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             dock_edge,
             set_hit_regions,
+            set_input_capture,
             lookup_word,
+            translate_sentence,
             quit_app
         ])
         .setup(move |app| {

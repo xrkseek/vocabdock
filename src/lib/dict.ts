@@ -9,10 +9,16 @@ export type DictHit = {
   etymology?: string;
 };
 
+/** empty | freeform note | English headword | English sentence */
+export type EntryKind = "empty" | "note" | "word" | "sentence";
+
+const CJK =
+  /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af\u0600-\u06ff]/;
+
 function cleanWord(raw: string): string | null {
-  const word = raw.trim().toLowerCase();
-  if (word.length < 2 || word.length > 40) return null;
-  if (!/^[a-z]+(?:['-][a-z]+)*$/i.test(word)) return null;
+  const word = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (word.length < 2 || word.length > 64) return null;
+  if (!/^[a-z]+(?:['\- ][a-z]+)*$/i.test(word)) return null;
   return word;
 }
 
@@ -109,13 +115,20 @@ async function lookupYoudaoBrowser(word: string): Promise<DictHit | null> {
   const blng = json.blng_sents_part as
     | { "sentence-pair"?: Array<{ sentence?: string }> }
     | undefined;
-  const rawEx = blng?.["sentence-pair"]?.[0]?.sentence;
-  const example = rawEx ? stripHtml(String(rawEx)) : undefined;
+  const pair = blng?.["sentence-pair"]?.[0];
+  const example = pair?.sentence ? stripHtml(String(pair.sentence)) : undefined;
   const forms = pickForms(json);
   const phrases = pickPhrases(json);
   const synonyms = pickSynonyms(json);
   const etymology = pickEtym(json);
-  if (!meaning && !example && !forms && !phrases && !synonyms && !etymology) {
+  if (
+    !meaning &&
+    !example &&
+    !forms &&
+    !phrases &&
+    !synonyms &&
+    !etymology
+  ) {
     return null;
   }
   return { meaning, example, forms, phrases, synonyms, etymology };
@@ -129,6 +142,56 @@ export async function lookupWord(raw: string): Promise<DictHit | null> {
       return await invoke<DictHit | null>("lookup_word", { word });
     }
     return await lookupYoudaoBrowser(word);
+  } catch {
+    return null;
+  }
+}
+
+/** Latin-script English (no CJK / Arabic / Hangul / Kana). */
+export function isPrimarilyEnglish(raw: string): boolean {
+  const t = raw.trim();
+  if (!t || CJK.test(t)) return false;
+  return /[a-zA-Z]/.test(t);
+}
+
+/** English sentence (call only after isPrimarilyEnglish). */
+export function looksLikeSentence(raw: string): boolean {
+  const t = raw.trim();
+  if (t.length < 10) return false;
+  const words = t.split(/\s+/).filter(Boolean).length;
+  return words >= 5 || /[.!?;]/.test(t);
+}
+
+export function classifyEntry(raw: string): EntryKind {
+  const t = raw.trim();
+  if (!t) return "empty";
+  if (!isPrimarilyEnglish(t)) return "note";
+  if (looksLikeSentence(t)) return "sentence";
+  return "word";
+}
+
+/** Short tab / pill label. */
+export function tabTitle(word: string): string {
+  const t = word.trim() || "NEW";
+  const kind = classifyEntry(t);
+  if (kind === "sentence") {
+    const cut = t.split(/\s+/).slice(0, 4).join(" ");
+    return cut.length < t.length ? `${cut}…` : cut;
+  }
+  if (kind === "note" && [...t].length > 12) {
+    return `${[...t].slice(0, 11).join("")}…`;
+  }
+  return t;
+}
+
+/** Bing EN→ZH (Tauri backend). Browser preview has no Bing CORS path. */
+export async function translateSentence(raw: string): Promise<string | null> {
+  const text = raw.trim();
+  if (text.length < 2 || text.length > 500) return null;
+  if (!/[a-zA-Z]/.test(text)) return null;
+  try {
+    if (!isTauri()) return null;
+    return await invoke<string | null>("translate_sentence", { text });
   } catch {
     return null;
   }

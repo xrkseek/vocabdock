@@ -34,7 +34,7 @@ textarea {
 }
 
 .edge-hotzone,
-.fan-shell,
+.fan,
 .tab,
 .icon-btn,
 .tab-preview,
@@ -42,15 +42,16 @@ textarea {
   pointer-events: auto;
 }
 
-/* —— Rest: pill at Noty pillTop (stable when panel shrinks). —— */
+/* —— Rest: pill fully on-screen at the right edge. —— */
 .edge-hotzone {
   position: absolute;
   right: 0;
-  left: 0;
+  width: 18px;
+  left: auto;
   border: 0;
   margin: 0;
   padding: 0;
-  background: rgba(8, 8, 12, 0.04);
+  background: transparent;
   cursor: pointer;
   display: flex;
   align-items: stretch;
@@ -70,11 +71,13 @@ textarea {
   justify-content: center;
   gap: 5px;
   pointer-events: none;
+  /* No scaleX — in an 18px HWND it clips and looks like jitter. */
+  transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .edge-hotzone:hover .pill {
-  width: 14px;
-  background: rgba(20, 18, 16, 0.92);
+  background: rgba(20, 18, 16, 0.94);
+  box-shadow: -3px 1px 12px rgba(0, 0, 0, 0.34);
 }
 
 .dash {
@@ -84,15 +87,18 @@ textarea {
   flex-shrink: 0;
 }
 
-/* —— Fan: top = Noty fanTop (aligned to resting pill). —— */
+/* —— Fan: flush to window right (Windows HWND clips negative right). —— */
 .fan-shell {
   position: absolute;
   right: 0;
-  width: 70px;
+  width: var(--tab-w, 30px);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   padding: 0;
+  pointer-events: none;
+  overflow: visible;
+  background: transparent;
 }
 
 .fan {
@@ -100,7 +106,7 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  max-height: min(68vh, 720px);
+  max-height: var(--fan-max, 68vh);
   overflow-x: visible;
   overflow-y: auto;
   scrollbar-width: none;
@@ -108,6 +114,8 @@ textarea {
 
 .fan::-webkit-scrollbar {
   display: none;
+  width: 0;
+  height: 0;
 }
 
 .tab {
@@ -119,6 +127,18 @@ textarea {
   cursor: pointer;
   flex-shrink: 0;
   overflow: visible;
+  touch-action: none;
+  /* No per-tab zIndex — Noty: breaks shingle paint order. */
+}
+
+.tab.is-dragging {
+  z-index: 30 !important;
+}
+
+.tab.is-dragging .tab-face {
+  transition: none;
+  box-shadow: -8px 6px 20px rgba(0, 0, 0, 0.32);
+  opacity: 0.95;
 }
 
 .tab-face {
@@ -132,8 +152,14 @@ textarea {
   position: relative;
   overflow: hidden;
   transition:
-    transform 0.28s cubic-bezier(0.22, 1.15, 0.36, 1),
-    box-shadow 0.28s ease;
+    transform 0.12s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.1s ease-out;
+  will-change: transform;
+}
+
+.deck.is-staging .tab-face {
+  /* Let GSAP own transforms during shingle reveal. */
+  transition: none;
 }
 
 .tab:hover .tab-face {
@@ -144,28 +170,32 @@ textarea {
 .tab.is-open .tab-face {
   transform: rotate(-2deg) translateX(-6px);
   box-shadow: -5px 3px 16px rgba(0, 0, 0, 0.26);
+  /* Springy settle — avoid competing with the note entrance. */
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.18s ease-out;
 }
 
-/* Sideways label like Noty: laid out horizontally, then rotated 90° so
-   the word reads top → bottom along the uncovered strip. Sized to fit. */
+/* Sideways label: centered in the visible shingle strip (Noty reads
+   top→bottom; we keep that orientation but center in --strip). */
 .tab-label {
   position: absolute;
-  top: 6px;
+  top: calc(var(--strip, 56px) / 2);
   left: 50%;
-  width: calc(var(--strip, 56px) - 12px);
+  width: calc(var(--strip, 56px) - 10px);
   height: var(--tab-w, 30px);
-  margin-left: calc(var(--tab-w, 30px) / -2);
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  padding-left: 2px;
+  justify-content: center;
+  padding: 0;
   font-size: 9.5px;
   font-weight: 650;
   letter-spacing: 0.1px;
   text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
-  transform: rotate(90deg);
+  text-overflow: ellipsis;
+  transform: translate(-50%, -50%) rotate(90deg);
   transform-origin: center center;
   pointer-events: none;
 }
@@ -195,112 +225,218 @@ textarea {
   background: rgba(255, 252, 245, 0.94);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
   cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .icon-btn:hover {
   background: #fff;
+  transform: scale(1.06);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
 }
 
-/* Preview: normal horizontal type */
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+/* Preview: sits fully left of tabs so rounded corners are never sliced. */
 .tab-preview {
   position: absolute;
-  right: 78px;
-  top: 12%;
-  width: 220px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border-left: 3px solid;
-  box-shadow: -6px 10px 24px rgba(0, 0, 0, 0.18);
-  z-index: 20;
-  animation: tab-preview-in 0.26s cubic-bezier(0.22, 1.15, 0.36, 1) both;
+  /* top / right / width set inline from GEOM */
+  padding: 12px 14px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-left-width: 3px;
+  border-left-style: solid;
+  box-shadow: -4px 4px 18px rgba(0, 0, 0, 0.22);
+  z-index: 30;
+  cursor: pointer;
+  overflow: visible;
+  pointer-events: auto;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+  animation: tab-preview-in 0.08s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes tab-preview-in {
   from {
     opacity: 0;
-    transform: translateX(10px) scale(0.97);
+    transform: translateX(6px);
   }
   to {
     opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: translateX(0);
   }
 }
 
-.tab-preview strong {
-  display: block;
-  font-size: 17px;
-  font-family: Georgia, "Iowan Old Style", serif;
-  margin-bottom: 6px;
+.tab-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-width: 0;
+  text-align: left;
+}
+
+.tab-preview-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tab-preview-head strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: Georgia, "Iowan Old Style", "Songti SC", serif;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.tab-preview-pin {
+  font-size: 9px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.tab-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tab-preview-body p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.88;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   word-break: break-word;
 }
 
-.tab-preview p {
+.tab-preview-empty {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  opacity: 0.88;
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.45;
+  text-align: left;
 }
 
-/* Note card — grows from its tab (Noty) */
+/* Note card — outer shell; scroll lives inside to avoid double OS bars. */
 .note-card {
   position: absolute;
-  right: 52px;
-  width: min(400px, calc(100% - 60px));
+  right: var(--note-inset, 52px);
+  width: min(400px, calc(100% - 88px));
   min-height: 160px;
   max-height: min(72%, 640px);
   border-radius: 14px 4px 14px 14px;
-  border-left: 3px solid;
-  box-shadow: -8px 12px 32px rgba(0, 0, 0, 0.2);
+  border-left: 3px solid transparent;
+  box-shadow: none;
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   z-index: 40;
   color-scheme: light;
-  /* thin paper-matching scrollbar (not OS chrome) */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(58, 48, 8, 0.28) transparent;
-}
-
-.note-card::-webkit-scrollbar {
-  width: 5px;
-  height: 0;
-}
-
-.note-card::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-.note-card::-webkit-scrollbar-track {
-  background: transparent;
-  margin: 10px 0;
-}
-
-.note-card::-webkit-scrollbar-thumb {
-  background: rgba(58, 48, 8, 0.22);
-  border-radius: 999px;
-}
-
-.note-card::-webkit-scrollbar-thumb:hover {
-  background: rgba(58, 48, 8, 0.4);
-}
-
-.note-card::-webkit-scrollbar-button {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-  -webkit-appearance: none;
+  display: flex;
+  flex-direction: column;
 }
 
 .note-card.is-visible {
   pointer-events: auto;
+  visibility: visible;
+  /* Opacity is driven by GSAP on open; keep a safe fallback. */
+  opacity: 1;
+  box-shadow: -8px 12px 32px rgba(0, 0, 0, 0.2);
+  will-change: transform, opacity;
+}
+
+.note-card.is-free {
+  right: auto;
+  /* Don't keep the dock's 88px tab reserve — free cards may sit on the left. */
+  width: min(400px, calc(100% - 16px));
+}
+
+.note-card.is-dragging-note {
+  transition: none !important;
+  box-shadow: -12px 18px 40px rgba(0, 0, 0, 0.34);
+  z-index: 60 !important;
+  cursor: grabbing;
+}
+
+.note-card.is-pinned {
+  box-shadow: -8px 14px 36px rgba(0, 0, 0, 0.28);
+}
+
+.note-card.is-focus {
+  z-index: 46;
+}
+
+.note-card:not(.is-visible) {
+  will-change: auto;
+}
+
+.note-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(58, 48, 8, 0.28) transparent;
+}
+
+.note-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.note-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 10px 0;
+}
+
+.note-scroll::-webkit-scrollbar-thumb {
+  background: rgba(58, 48, 8, 0.22);
+  border-radius: 999px;
+}
+
+.note-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(58, 48, 8, 0.4);
+}
+
+.note-scroll::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.note-scroll::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .note-body {
-  padding: 14px 16px 12px;
+  padding: 14px 16px 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.note-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 4px 10px 12px 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .dict-hint {
@@ -313,24 +449,6 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  animation: note-section-in 0.28s ease-out both;
-}
-
-@keyframes note-section-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .note-section {
-    animation: none;
-  }
 }
 
 .note-section-label {
@@ -351,9 +469,35 @@ textarea {
   padding: 0;
   line-height: 1.45;
   font-size: 13px;
-  /* scroll only on the card — avoid nested OS scrollbars inside fields */
   overflow: hidden;
   max-height: none;
+}
+
+.note-section.is-scroll textarea {
+  max-height: 5.8em;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(58, 48, 8, 0.28) transparent;
+}
+
+.note-section.is-scroll textarea::-webkit-scrollbar {
+  width: 4px;
+}
+
+.note-section.is-scroll textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.note-section.is-scroll textarea::-webkit-scrollbar-thumb {
+  background: rgba(58, 48, 8, 0.22);
+  border-radius: 999px;
+}
+
+.note-section.is-scroll textarea::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .note-section.is-emphasis textarea {
@@ -365,6 +509,39 @@ textarea {
   display: flex;
   gap: 10px;
   align-items: flex-start;
+}
+
+.note-grip {
+  flex-shrink: 0;
+  margin-top: 4px;
+  width: 14px;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: -0.06em;
+  opacity: 0.35;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.note-grip:hover {
+  opacity: 0.6;
+}
+
+body.is-note-dragging,
+body.is-note-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+body.is-tab-dragging,
+body.is-tab-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+body.is-tab-dragging .tab-face {
+  opacity: 0.85;
 }
 
 .note-word {
@@ -379,6 +556,21 @@ textarea {
   letter-spacing: -0.02em;
   outline: none;
   padding: 0;
+  resize: none;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-word.is-sentence {
+  white-space: pre-wrap;
+  overflow-y: auto;
+  text-overflow: unset;
+  font-size: 16px;
+  font-weight: 650;
+  max-height: 4.8em;
+  scrollbar-width: thin;
 }
 
 .note-word::placeholder {
@@ -408,31 +600,35 @@ textarea {
 }
 
 .note-delete {
-  align-self: flex-start;
   border: 0;
   background: transparent;
   color: inherit;
-  opacity: 0.45;
+  opacity: 0.5;
   font-size: 12px;
   cursor: pointer;
   text-decoration: underline;
-  padding: 0;
+  padding: 8px 10px;
+  margin: -4px 0 0 -6px;
+  border-radius: 8px;
+  min-height: 32px;
 }
 
 .note-delete:hover {
-  opacity: 0.85;
+  opacity: 0.9;
+  background: rgba(0, 0, 0, 0.05);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pill,
   .tab-face,
   .tab:hover .tab-face,
-  .tab.is-open .tab-face {
+  .tab.is-open .tab-face,
+  .icon-btn {
     transition: none;
   }
 
-  .tab-preview,
-  .note-section {
+  .tab-preview {
     animation: none;
+    transition: none;
   }
 }
