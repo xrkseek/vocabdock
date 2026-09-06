@@ -3,7 +3,7 @@
 Windows 屏幕右缘停靠的英语词条便利贴（Tauri 2 + React + GSAP）。  
 交互参考 [Noty](https://github.com/aimen08/noty)：收起彩条 → 扇出标签 → 抽出词卡。
 
-> 安装后**不会出现普通大窗口**。看屏幕**最右侧彩色细条**，或托盘图标「VocabDock」。不要和系统记事本 / Notepad3 搞混。
+> 安装后不会弹出普通大窗口。请看屏幕**最右侧彩色细条**，或托盘图标「VocabDock」。
 
 ## 功能
 
