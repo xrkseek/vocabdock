@@ -87,8 +87,10 @@ export default function App() {
   const dictSeq = useRef(0);
   const kindRef = useRef(kind);
   const openIdRef = useRef(openId);
+  const notesRef = useRef(notes);
   kindRef.current = kind;
   openIdRef.current = openId;
+  notesRef.current = notes;
 
   const active = useMemo(
     () => [...notes].sort((a, b) => a.order - b.order),
@@ -128,7 +130,17 @@ export default function App() {
     lastActivity.current = Date.now();
   };
 
+  /** Debounced disk write always reads latest notes — never a stale closure snapshot. */
+  const queueSave = () => {
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveNotes(notesRef.current);
+    }, GEOM.autosaveMs);
+  };
+
   const persist = (next: VocabNote[]) => {
+    window.clearTimeout(saveTimer.current);
+    notesRef.current = next;
     setNotes(next);
     saveNotes(next);
   };
@@ -337,11 +349,8 @@ export default function App() {
   const patchNote = (id: string, patch: Partial<VocabNote>) => {
     setNotes((prev) => {
       const next = prev.map((n) => (n.id === id ? { ...n, ...patch } : n));
-      window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(
-        () => saveNotes(next),
-        GEOM.autosaveMs,
-      );
+      notesRef.current = next;
+      queueSave();
       return next;
     });
     bump();
@@ -378,11 +387,8 @@ export default function App() {
               etymology: hit.etymology || n.etymology,
             };
           });
-          window.clearTimeout(saveTimer.current);
-          saveTimer.current = window.setTimeout(
-            () => saveNotes(next),
-            GEOM.autosaveMs,
-          );
+          notesRef.current = next;
+          queueSave();
           return next;
         });
         setDictHint("已填入释义、例句与派生");
